@@ -108,7 +108,6 @@ pub fn generate_bigram_drill(
             result.push(' ');
             group_len = 0;
         } else {
-            // Pick two chars for a bigram
             let a = *chars.choose(rng).unwrap();
             let b = *chars.choose(rng).unwrap();
             result.push(a);
@@ -117,4 +116,156 @@ pub fn generate_bigram_drill(
         }
     }
     result
+}
+
+/// Generate column drill text for a single finger's column.
+///
+/// Trains vertical reaches on the columnar layout:
+/// 1. Home → reach → home (basic reach training)
+/// 2. Home → reach1 → home → reach2 (alternating reaches)
+/// 3. Direct reach-to-reach (no home return, harder)
+pub fn generate_column_drill(
+    home: char,
+    reaches: &[char],
+    target_len: usize,
+    rng: &mut impl Rng,
+) -> String {
+    if reaches.is_empty() {
+        return generate_char_drill(&[home], target_len, rng);
+    }
+
+    let mut result = String::new();
+    let mut phase = 0u8;
+
+    while result.len() < target_len {
+        if !result.is_empty() {
+            result.push(' ');
+        }
+
+        match phase % 3 {
+            // Phase 0: home-reach-home for a single reach key
+            0 => {
+                let reach = *reaches.choose(rng).unwrap();
+                result.push(home);
+                result.push(reach);
+                result.push(home);
+            }
+            // Phase 1: home-reach1-home-reach2 (alternating two reaches)
+            1 => {
+                let r1 = *reaches.choose(rng).unwrap();
+                let r2 = *reaches.choose(rng).unwrap();
+                result.push(home);
+                result.push(r1);
+                result.push(home);
+                result.push(r2);
+                result.push(home);
+            }
+            // Phase 2: direct reach-to-reach traversal (no home return)
+            2 => {
+                let count = 3 + rng.gen_range(0..3);
+                for i in 0..count {
+                    if i == 0 {
+                        result.push(home);
+                    }
+                    result.push(*reaches.choose(rng).unwrap());
+                }
+                result.push(home);
+            }
+            _ => unreachable!(),
+        }
+        phase = phase.wrapping_add(1);
+    }
+
+    result
+}
+
+/// Generate stagger-to-columnar transition drill text.
+///
+/// On a staggered keyboard, the bottom row is offset. On columnar, it's straight.
+/// This generates text heavy in the key pairs that cause confusion during transition.
+///
+/// Each pair is (intended_key, commonly_confused_with). The drill emphasizes
+/// the correct key and its column neighbors.
+pub fn generate_confusion_drill(
+    pairs: &[(char, char)],
+    all_chars: &HashSet<char>,
+    target_len: usize,
+    rng: &mut impl Rng,
+) -> String {
+    if pairs.is_empty() {
+        let chars: Vec<char> = all_chars.iter().copied().collect();
+        return generate_bigram_drill(&chars, target_len, rng);
+    }
+
+    // Build a weighted char pool: confusion pair chars appear 3x more
+    let mut pool: Vec<char> = all_chars.iter().copied().filter(|c| *c != ' ').collect();
+    for (a, b) in pairs {
+        if all_chars.contains(a) && all_chars.contains(b) {
+            for _ in 0..3 {
+                pool.push(*a);
+                pool.push(*b);
+            }
+        }
+    }
+
+    let mut result = String::new();
+    let mut group_len = 0;
+
+    while result.len() < target_len {
+        if group_len >= 3 + rng.gen_range(0..3) {
+            result.push(' ');
+            group_len = 0;
+            continue;
+        }
+
+        // 60% chance: pick a confusion pair and drill it
+        if rng.gen_range(0..10) < 6 && !pairs.is_empty() {
+            let (a, b) = pairs.choose(rng).unwrap();
+            if all_chars.contains(a) && all_chars.contains(b) {
+                // Generate a short pattern with the pair
+                match rng.gen_range(0..4) {
+                    0 => {
+                        result.push(*a);
+                        result.push(*b);
+                        group_len += 2;
+                    }
+                    1 => {
+                        result.push(*b);
+                        result.push(*a);
+                        group_len += 2;
+                    }
+                    2 => {
+                        result.push(*a);
+                        result.push(*b);
+                        result.push(*a);
+                        group_len += 3;
+                    }
+                    _ => {
+                        result.push(*b);
+                        result.push(*a);
+                        result.push(*b);
+                        group_len += 3;
+                    }
+                }
+            }
+        } else {
+            // Fill with a random char from the weighted pool
+            result.push(*pool.choose(rng).unwrap());
+            group_len += 1;
+        }
+    }
+
+    result
+}
+
+/// Words that emphasize bottom-row keys (for stagger transition practice).
+pub fn words_heavy_in(target_chars: &[char], available: &HashSet<char>) -> Vec<&'static str> {
+    WORDS
+        .iter()
+        .copied()
+        .filter(|word| {
+            word.chars().all(|c| available.contains(&c))
+                && word.chars().any(|c| target_chars.contains(&c))
+        })
+        .collect()
 }
