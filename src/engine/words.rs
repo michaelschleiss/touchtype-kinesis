@@ -1,0 +1,120 @@
+use rand::seq::SliceRandom;
+use rand::Rng;
+use std::collections::HashSet;
+
+/// Top English words sorted roughly by frequency.
+const WORDS: &[&str] = &[
+    "the", "be", "to", "of", "and", "a", "in", "that", "have", "i", "it", "for",
+    "not", "on", "with", "he", "as", "you", "do", "at", "this", "but", "his",
+    "by", "from", "they", "we", "her", "she", "or", "an", "will", "my", "one",
+    "all", "would", "there", "their", "what", "so", "up", "out", "if", "about",
+    "who", "get", "which", "go", "me", "when", "make", "can", "like", "time",
+    "no", "just", "him", "know", "take", "people", "into", "year", "your",
+    "good", "some", "could", "them", "see", "other", "than", "then", "now",
+    "look", "only", "come", "its", "over", "think", "also", "back", "after",
+    "use", "two", "how", "our", "work", "first", "well", "way", "even", "new",
+    "want", "because", "any", "these", "give", "day", "most", "us", "great",
+    "old", "tell", "ask", "find", "here", "thing", "many", "long", "big",
+    "high", "such", "still", "own", "last", "life", "man", "call", "world",
+    "very", "hand", "part", "live", "run", "place", "being", "under", "same",
+    "right", "move", "try", "left", "late", "name", "turn", "large", "must",
+    "home", "show", "end", "does", "point", "line", "state", "head", "need",
+    "start", "far", "small", "down", "side", "been", "never", "each", "much",
+    "might", "next", "more", "while", "house", "group", "case", "off", "set",
+    "keep", "few", "light", "help", "near", "land", "child", "eye", "door",
+    "open", "seem", "close", "night", "real", "play", "feel", "kind", "read",
+    "stand", "face", "change", "water", "room", "stop", "city", "best",
+    "body", "family", "school", "less", "idea", "study", "young", "hard",
+    "table", "given", "three", "began", "often", "those", "told", "put",
+    "done", "half", "plan", "full", "word", "fact", "hold", "hear", "form",
+    "took", "book", "add", "sure", "area", "deep", "yet", "story", "age",
+    "field", "mind", "able", "food", "talk", "job", "sort", "girl", "walk",
+    "fish", "mark", "lead", "draw", "money", "note", "class", "got", "free",
+    "fall", "bring", "look", "may", "said", "went", "made", "had", "did",
+    "sat", "let", "got", "cut", "felt", "bit", "bad", "bed", "red", "dog",
+    "top", "hot", "run", "sit", "hit", "bus", "cup", "sun", "ten", "yes",
+    "air", "ago", "act", "art", "arm", "box", "car", "cry", "dry", "due",
+    "ear", "eat", "egg", "fix", "fly", "fun", "gas", "hat", "ice", "ill",
+    "key", "kid", "lay", "leg", "lip", "log", "lot", "map", "mix", "mud",
+    "nor", "odd", "oil", "pay", "per", "pin", "pot", "pub", "raw", "rid",
+    "row", "sad", "sea", "sir", "sky", "sum", "tea", "tie", "tip", "van",
+    "via", "war", "wet", "win", "wood", "ship", "dark", "past", "deal",
+    "grow", "wide", "cool", "fill", "safe", "sign", "mile", "ring", "rule",
+    "join", "seem", "test", "rise", "flat", "firm", "soft", "drop", "rest",
+    "roll", "shut", "step", "skin", "blow", "pick", "edge", "iron", "code",
+    "pure", "push", "mass", "fine", "burn", "lift", "thus", "unit", "inch",
+    "link", "gain", "folk", "band", "pool", "root", "tape", "hang", "gift",
+    "rush", "deck", "fast", "plug", "mode", "tend", "tone", "bold", "slip",
+    "snap", "spin", "peak", "span", "loop", "port", "dust", "palm",
+];
+
+/// Filter the word list to only contain words using the given set of characters.
+pub fn words_for_chars(available: &HashSet<char>) -> Vec<&'static str> {
+    WORDS
+        .iter()
+        .copied()
+        .filter(|word| word.chars().all(|c| available.contains(&c)))
+        .collect()
+}
+
+/// Generate exercise text from a word list.
+pub fn generate_word_text(words: &[&str], target_len: usize, rng: &mut impl Rng) -> String {
+    if words.is_empty() {
+        return String::new();
+    }
+    let mut result = String::new();
+    while result.len() < target_len {
+        if !result.is_empty() {
+            result.push(' ');
+        }
+        let word = words.choose(rng).unwrap();
+        result.push_str(word);
+    }
+    result
+}
+
+/// Generate random character sequences from available chars (for early drills).
+pub fn generate_char_drill(chars: &[char], target_len: usize, rng: &mut impl Rng) -> String {
+    if chars.is_empty() {
+        return String::new();
+    }
+    let mut result = String::new();
+    let mut group_len = 0;
+    while result.len() < target_len {
+        if group_len >= 3 + rng.gen_range(0..3) {
+            result.push(' ');
+            group_len = 0;
+        } else {
+            result.push(*chars.choose(rng).unwrap());
+            group_len += 1;
+        }
+    }
+    result
+}
+
+/// Generate bigram-focused drill text.
+pub fn generate_bigram_drill(
+    chars: &[char],
+    target_len: usize,
+    rng: &mut impl Rng,
+) -> String {
+    if chars.len() < 2 {
+        return generate_char_drill(chars, target_len, rng);
+    }
+    let mut result = String::new();
+    let mut group_len = 0;
+    while result.len() < target_len {
+        if group_len >= 4 + rng.gen_range(0..3) {
+            result.push(' ');
+            group_len = 0;
+        } else {
+            // Pick two chars for a bigram
+            let a = *chars.choose(rng).unwrap();
+            let b = *chars.choose(rng).unwrap();
+            result.push(a);
+            result.push(b);
+            group_len += 2;
+        }
+    }
+    result
+}
