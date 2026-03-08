@@ -269,3 +269,88 @@ pub fn words_heavy_in(target_chars: &[char], available: &HashSet<char>) -> Vec<&
         })
         .collect()
 }
+
+/// Generate text emphasizing specific target bigrams.
+///
+/// ~60% of character pairs come from the target bigrams, ~40% random filler.
+/// Produces space-separated groups of 4-7 characters.
+pub fn generate_targeted_bigram_drill(
+    bigrams: &[(char, char)],
+    chars: &HashSet<char>,
+    target_len: usize,
+    rng: &mut impl Rng,
+) -> String {
+    if bigrams.is_empty() {
+        let chars: Vec<char> = chars.iter().copied().collect();
+        return generate_bigram_drill(&chars, target_len, rng);
+    }
+
+    let filler: Vec<char> = chars.iter().copied().filter(|c| *c != ' ').collect();
+    let mut result = String::new();
+    let mut group_len = 0;
+
+    while result.len() < target_len {
+        if group_len >= 4 + rng.gen_range(0..4) {
+            result.push(' ');
+            group_len = 0;
+            continue;
+        }
+
+        // 60% chance: emit a target bigram
+        if rng.gen_range(0..10) < 6 {
+            let (a, b) = bigrams[rng.gen_range(0..bigrams.len())];
+            result.push(a);
+            result.push(b);
+            group_len += 2;
+        } else if !filler.is_empty() {
+            result.push(filler[rng.gen_range(0..filler.len())]);
+            group_len += 1;
+        }
+    }
+
+    result
+}
+
+/// Generate rhythm drill text: repeating short common word patterns.
+///
+/// Picks 2-3 short words and repeats them in a pattern. Changes the
+/// pattern every ~40 characters to prevent pure memorization while
+/// still allowing the typist to focus on even timing.
+pub fn generate_rhythm_drill(target_len: usize, rng: &mut impl Rng) -> String {
+    const SHORT_WORDS: &[&str] = &[
+        "the", "and", "for", "are", "but", "not", "you", "all", "can", "had",
+        "her", "was", "one", "our", "out", "has", "his", "how", "its", "may",
+        "new", "now", "old", "see", "way", "who", "did", "get", "let", "say",
+    ];
+
+    let mut result = String::new();
+    let mut chars_since_change = 0;
+
+    // Pick initial pattern (2-3 words)
+    let mut pattern: Vec<&str> = Vec::new();
+    let pattern_len = 2 + rng.gen_range(0..2);
+    for _ in 0..pattern_len {
+        pattern.push(SHORT_WORDS[rng.gen_range(0..SHORT_WORDS.len())]);
+    }
+    let mut pattern_idx = 0;
+
+    while result.len() < target_len {
+        if !result.is_empty() {
+            result.push(' ');
+        }
+        result.push_str(pattern[pattern_idx]);
+        pattern_idx = (pattern_idx + 1) % pattern.len();
+        chars_since_change += pattern[pattern_idx].len() + 1;
+
+        // Change pattern every ~40 characters
+        if chars_since_change >= 40 {
+            // Swap one word in the pattern
+            let swap_idx = rng.gen_range(0..pattern.len());
+            pattern[swap_idx] = SHORT_WORDS[rng.gen_range(0..SHORT_WORDS.len())];
+            pattern_idx = 0;
+            chars_since_change = 0;
+        }
+    }
+
+    result
+}

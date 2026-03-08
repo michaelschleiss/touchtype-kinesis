@@ -8,12 +8,13 @@ use ratatui::{
     Frame,
 };
 
-use crate::engine::{self, Lesson, TypingSession};
+use crate::engine::{self, Curriculum, Lesson, ProgressionResult, TypingSession};
 use crate::keyboard;
 use crate::persistence::UserProgress;
 use crate::ui;
 
 const EXERCISE_LEN: usize = 120;
+const FLOW_EXERCISE_LEN: usize = 200;
 const MAX_TYPING_WIDTH: u16 = 72;
 const MIN_WIDTH: u16 = 50;
 const MIN_HEIGHT: u16 = 20;
@@ -43,7 +44,7 @@ pub struct App {
 
     pub menu_selection: usize,
 
-    pub lessons: Vec<Lesson>,
+    pub curriculum: Curriculum,
     pub lesson_selection: usize,
 
     pub session: Option<TypingSession>,
@@ -51,6 +52,7 @@ pub struct App {
     pub typing_mode: TypingMode,
     pub last_pressed: Option<(char, bool)>,
     pub flash_frames: u8,
+    pub last_result: Option<ProgressionResult>,
 
     pub progress: UserProgress,
 
@@ -64,13 +66,14 @@ impl App {
             should_quit: false,
             layout: keyboard::Layout::kinesis360(),
             menu_selection: 0,
-            lessons: engine::lesson::all_lessons(),
+            curriculum: Curriculum::new(),
             lesson_selection: 0,
             session: None,
             current_lesson_id: 0,
             typing_mode: TypingMode::Lesson,
             last_pressed: None,
             flash_frames: 0,
+            last_result: None,
             progress: UserProgress::load(),
             rng: rand::rngs::StdRng::from_entropy(),
         }
@@ -127,7 +130,7 @@ impl App {
                 }
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                if self.lesson_selection < self.lessons.len() - 1 {
+                if self.lesson_selection < self.curriculum.lessons.len() - 1 {
                     self.lesson_selection += 1;
                 }
             }
@@ -179,12 +182,16 @@ impl App {
     fn handle_results_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Enter => {
-                let passed = self.check_passed();
+                let passed = self
+                    .last_result
+                    .as_ref()
+                    .map(|r| r.passed)
+                    .unwrap_or(false);
                 match self.typing_mode {
                     TypingMode::Lesson => {
                         if passed {
                             let next = self.current_lesson_id + 1;
-                            if next < self.lessons.len() {
+                            if next < self.curriculum.lessons.len() {
                                 self.start_lesson(next);
                             } else {
                                 self.screen = Screen::Menu;
@@ -216,13 +223,29 @@ impl App {
         }
     }
 
+    fn exercise_len_for_lesson(&self, lesson: &Lesson) -> usize {
+        // Flow Practice gets a longer exercise
+        if lesson.name == "Flow Practice" {
+            FLOW_EXERCISE_LEN
+        } else {
+            EXERCISE_LEN
+        }
+    }
+
     fn start_lesson(&mut self, id: usize) {
         self.current_lesson_id = id;
         self.typing_mode = TypingMode::Lesson;
-        let lesson = &self.lessons[id];
-        let text = lesson.generate_text(EXERCISE_LEN, &mut self.rng);
+        let lesson = &self.curriculum.lessons[id];
+        let target_len = self.exercise_len_for_lesson(lesson);
+        let text = engine::exercise::generate_text(
+            &lesson.exercise_type,
+            &lesson.chars,
+            target_len,
+            &mut self.rng,
+        );
         self.session = Some(TypingSession::new(text));
         self.last_pressed = None;
+        self.last_result = None;
         self.flash_frames = 0;
         self.screen = Screen::Typing;
     }
@@ -236,6 +259,7 @@ impl App {
         self.session = Some(TypingSession::new(text));
         self.current_lesson_id = usize::MAX; // no lesson
         self.last_pressed = None;
+        self.last_result = None;
         self.flash_frames = 0;
         self.screen = Screen::Typing;
     }
@@ -249,6 +273,7 @@ impl App {
         self.session = Some(TypingSession::new(text));
         self.current_lesson_id = usize::MAX;
         self.last_pressed = None;
+        self.last_result = None;
         self.flash_frames = 0;
         self.screen = Screen::Typing;
     }
@@ -258,36 +283,32 @@ impl App {
             return;
         };
 
-        let wpm = session.net_wpm();
-        let accuracy = session.accuracy();
-        let target = self
-            .lessons
-            .get(self.current_lesson_id)
-            .map(|l| l.target_accuracy)
-            .unwrap_or(0.9);
-        let passed = accuracy >= target;
+        let lesson = self.curriculum.lessons.get(self.current_lesson_id);
+        let result = if let Some(lesson) = lesson {
+            engine::progression::evaluate_session(session, lesson)
+        } else {
+            // Practice/Test mode: no progression gating
+            engine::progression::ProgressionResult {
+                passed: false,
+                wpm: session.net_wpm(),
+                accuracy: session.accuracy(),
+                target_accuracy: 0.9,
+                accuracy_passed: true,
+                target_wpm: None,
+                wpm_passed: true,
+            }
+        };
 
         self.progress.record_session(
             self.current_lesson_id,
-            wpm,
-            accuracy,
-            passed && self.typing_mode == TypingMode::Lesson,
+            result.wpm,
+            result.accuracy,
+            result.passed && self.typing_mode == TypingMode::Lesson,
             &session.per_key_stats,
         );
 
+        self.last_result = Some(result);
         self.screen = Screen::Results;
-    }
-
-    fn check_passed(&self) -> bool {
-        let Some(session) = &self.session else {
-            return false;
-        };
-        let target = self
-            .lessons
-            .get(self.current_lesson_id)
-            .map(|l| l.target_accuracy)
-            .unwrap_or(0.9);
-        session.accuracy() >= target
     }
 
     pub fn tick(&mut self) {
@@ -311,7 +332,10 @@ impl App {
                     Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
                 )),
                 Line::from(Span::styled(
-                    format!("Need {}x{}, have {}x{}", MIN_WIDTH, MIN_HEIGHT, area.width, area.height),
+                    format!(
+                        "Need {}x{}, have {}x{}",
+                        MIN_WIDTH, MIN_HEIGHT, area.width, area.height
+                    ),
                     Style::default().fg(Color::DarkGray),
                 )),
             ])
@@ -329,7 +353,7 @@ impl App {
             }
             Screen::LessonSelect => {
                 let widget = ui::LessonSelectWidget {
-                    lessons: &self.lessons,
+                    curriculum: &self.curriculum,
                     selected: self.lesson_selection,
                     highest_unlocked: self.progress.highest_lesson,
                 };
@@ -341,17 +365,11 @@ impl App {
             Screen::Results => {
                 if let Some(session) = &self.session {
                     let lesson_name = self.mode_label();
-                    let target_acc = self
-                        .lessons
-                        .get(self.current_lesson_id)
-                        .map(|l| l.target_accuracy)
-                        .unwrap_or(0.9);
 
                     let widget = ui::ResultsWidget {
                         session,
                         lesson_name,
-                        passed: session.accuracy() >= target_acc,
-                        target_accuracy: target_acc,
+                        result: self.last_result.as_ref(),
                     };
                     frame.render_widget(widget, area);
                 }
@@ -359,7 +377,7 @@ impl App {
             Screen::Progress => {
                 let widget = ui::ProgressWidget {
                     progress: &self.progress,
-                    total_lessons: self.lessons.len(),
+                    curriculum: &self.curriculum,
                 };
                 frame.render_widget(widget, area);
             }
@@ -369,6 +387,7 @@ impl App {
     fn mode_label(&self) -> &str {
         match self.typing_mode {
             TypingMode::Lesson => self
+                .curriculum
                 .lessons
                 .get(self.current_lesson_id)
                 .map(|l| l.name)

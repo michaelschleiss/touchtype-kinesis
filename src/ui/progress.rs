@@ -6,19 +6,21 @@ use ratatui::{
     widgets::{Paragraph, Widget},
 };
 
+use crate::engine::curriculum::ALL_STAGES;
+use crate::engine::Curriculum;
 use crate::persistence::UserProgress;
 
 pub struct ProgressWidget<'a> {
     pub progress: &'a UserProgress,
-    pub total_lessons: usize,
+    pub curriculum: &'a Curriculum,
 }
 
 impl Widget for ProgressWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let chunks = Layout::vertical([
             Constraint::Length(2),  // header
-            Constraint::Length(7),  // stats
-            Constraint::Min(4),    // per-key breakdown (flexible)
+            Constraint::Length(5),  // summary stats
+            Constraint::Min(4),    // stage breakdown + keys (flexible)
             Constraint::Length(2), // help
         ])
         .split(area);
@@ -33,20 +35,20 @@ impl Widget for ProgressWidget<'_> {
         header.render(chunks[0], buf);
 
         // Summary stats
-        let lessons_done = self.progress.highest_lesson;
+        let total_lessons = self.curriculum.lessons.len();
+        let lessons_done = self.progress.highest_lesson.min(total_lessons);
         let total_sessions = self.progress.total_sessions;
         let best_wpm = self.progress.best_wpm;
         let best_acc = self.progress.best_accuracy * 100.0;
 
         let bar_width = 20usize;
-        let filled =
-            (lessons_done as f64 / self.total_lessons as f64 * bar_width as f64) as usize;
+        let filled = (lessons_done as f64 / total_lessons as f64 * bar_width as f64) as usize;
         let bar: String = format!(
             "[{}{}] {}/{}",
             "#".repeat(filled),
             "-".repeat(bar_width - filled),
             lessons_done,
-            self.total_lessons
+            total_lessons
         );
 
         let stats = Paragraph::new(vec![
@@ -70,8 +72,6 @@ impl Widget for ProgressWidget<'_> {
                         .fg(Color::Green)
                         .add_modifier(Modifier::BOLD),
                 ),
-            ]),
-            Line::from(vec![
                 Span::styled("    Best Acc:  ", Style::default().fg(Color::DarkGray)),
                 Span::styled(
                     format!("{:.1}%", best_acc),
@@ -83,13 +83,65 @@ impl Widget for ProgressWidget<'_> {
         ]);
         stats.render(chunks[1], buf);
 
-        // Per-key accuracy (flexible height)
+        // Stage breakdown + per-key accuracy (share the flexible space)
+        let detail_chunks = Layout::vertical([
+            Constraint::Min(4),    // stage breakdown
+            Constraint::Length(1), // spacer
+            Constraint::Min(4),    // per-key
+        ])
+        .split(chunks[2]);
+
+        // Stage breakdown
+        let mut stage_lines = vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "    Stages:",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD),
+            )),
+        ];
+
+        for stage in ALL_STAGES {
+            let info = stage.info();
+            let stage_lessons = self.curriculum.lessons_for_stage(*stage);
+            let completed = stage_lessons
+                .iter()
+                .filter(|l| l.id < self.progress.highest_lesson)
+                .count();
+            let total = stage_lessons.len();
+            let all_done = completed == total;
+
+            let status_color = if all_done {
+                Color::Green
+            } else if completed > 0 {
+                Color::Yellow
+            } else {
+                Color::DarkGray
+            };
+
+            stage_lines.push(Line::from(vec![
+                Span::styled("      ", Style::default()),
+                Span::styled(
+                    format!("{:<22}", info.name),
+                    Style::default().fg(status_color),
+                ),
+                Span::styled(
+                    format!("{}/{}", completed, total),
+                    Style::default().fg(status_color),
+                ),
+            ]));
+        }
+
+        let stage_widget = Paragraph::new(stage_lines);
+        stage_widget.render(detail_chunks[0], buf);
+
+        // Per-key accuracy
         let mut key_stats: Vec<_> = self.progress.per_key_accuracy.iter().collect();
         key_stats.sort_by(|a, b| a.1.partial_cmp(b.1).unwrap());
 
-        let max_keys = (chunks[2].height as usize).saturating_sub(2);
+        let max_keys = (detail_chunks[2].height as usize).saturating_sub(2);
         let mut key_lines = vec![
-            Line::from(""),
             Line::from(Span::styled(
                 "    Keys to Improve:",
                 Style::default()
@@ -133,7 +185,7 @@ impl Widget for ProgressWidget<'_> {
             }
         }
         let key_widget = Paragraph::new(key_lines);
-        key_widget.render(chunks[2], buf);
+        key_widget.render(detail_chunks[2], buf);
 
         // Help
         let help = Paragraph::new(Line::from(vec![

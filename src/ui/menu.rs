@@ -6,6 +6,9 @@ use ratatui::{
     widgets::{Paragraph, Widget},
 };
 
+use crate::engine::curriculum::Stage;
+use crate::engine::Curriculum;
+
 // ─── Main Menu ───
 
 pub struct MainMenuWidget {
@@ -101,10 +104,84 @@ impl Widget for MainMenuWidget {
 
 // ─── Lesson Select ───
 
+/// A row in the lesson select display (some are headers, some are lessons).
+enum DisplayRow {
+    StageHeader {
+        name: &'static str,
+        cognitive_goal: &'static str,
+        wpm_range: (u16, u16),
+        stage_complete: bool,
+    },
+    LessonEntry {
+        lesson_id: usize,
+        name: &'static str,
+        description: &'static str,
+        is_locked: bool,
+        is_completed: bool,
+    },
+    Blank,
+}
+
 pub struct LessonSelectWidget<'a> {
-    pub lessons: &'a [crate::engine::Lesson],
+    pub curriculum: &'a Curriculum,
     pub selected: usize,
     pub highest_unlocked: usize,
+}
+
+impl LessonSelectWidget<'_> {
+    /// Build the display rows: stage headers interspersed with lesson entries.
+    fn build_rows(&self) -> Vec<DisplayRow> {
+        let mut rows = Vec::new();
+        let mut prev_stage: Option<Stage> = None;
+
+        for lesson in &self.curriculum.lessons {
+            // Insert stage header when stage changes
+            if prev_stage != Some(lesson.stage) {
+                if prev_stage.is_some() {
+                    rows.push(DisplayRow::Blank);
+                }
+
+                let info = lesson.stage.info();
+
+                // Check if all lessons in this stage are completed
+                let stage_lessons = self.curriculum.lessons_for_stage(lesson.stage);
+                let stage_complete = stage_lessons
+                    .iter()
+                    .all(|l| l.id < self.highest_unlocked);
+
+                rows.push(DisplayRow::StageHeader {
+                    name: info.name,
+                    cognitive_goal: info.cognitive_goal,
+                    wpm_range: info.wpm_range,
+                    stage_complete,
+                });
+
+                prev_stage = Some(lesson.stage);
+            }
+
+            rows.push(DisplayRow::LessonEntry {
+                lesson_id: lesson.id,
+                name: lesson.name,
+                description: lesson.description,
+                is_locked: lesson.id > self.highest_unlocked,
+                is_completed: lesson.id < self.highest_unlocked,
+            });
+        }
+
+        rows
+    }
+
+    /// Find the display row index for a given lesson selection index.
+    fn display_index_for_selection(rows: &[DisplayRow], selection: usize) -> usize {
+        for (i, row) in rows.iter().enumerate() {
+            if let DisplayRow::LessonEntry { lesson_id, .. } = row {
+                if *lesson_id == selection {
+                    return i;
+                }
+            }
+        }
+        0
+    }
 }
 
 impl Widget for LessonSelectWidget<'_> {
@@ -125,6 +202,10 @@ impl Widget for LessonSelectWidget<'_> {
         )));
         header.render(chunks[0], buf);
 
+        // Build display rows
+        let rows = self.build_rows();
+        let selected_display_idx = Self::display_index_for_selection(&rows, self.selected);
+
         // Lesson list — fixed left margin
         let left_margin = (area.width.saturating_sub(70) / 2).max(2);
         let list_area = Rect {
@@ -134,53 +215,100 @@ impl Widget for LessonSelectWidget<'_> {
         };
 
         let visible_height = list_area.height as usize;
-        let scroll_offset = if self.selected >= visible_height {
-            self.selected - visible_height + 1
+
+        // Scroll so selected item is visible
+        let scroll_offset = if selected_display_idx >= visible_height {
+            // Try to center the selection
+            selected_display_idx.saturating_sub(visible_height / 2)
         } else {
             0
         };
 
         let mut lines: Vec<Line> = Vec::new();
-        for (i, lesson) in self.lessons.iter().enumerate().skip(scroll_offset) {
+        for (_i, row) in rows.iter().enumerate().skip(scroll_offset) {
             if lines.len() >= visible_height {
                 break;
             }
 
-            let is_selected = i == self.selected;
-            let is_locked = i > self.highest_unlocked;
-            let is_completed = i < self.highest_unlocked;
+            match row {
+                DisplayRow::StageHeader {
+                    name,
+                    cognitive_goal,
+                    wpm_range,
+                    stage_complete,
+                } => {
+                    let wpm_str = if wpm_range.1 > 0 {
+                        format!(" ({}-{} WPM)", wpm_range.0, wpm_range.1)
+                    } else {
+                        String::new()
+                    };
 
-            let arrow = if is_selected { "> " } else { "  " };
+                    let check = if *stage_complete { "ok " } else { "   " };
+                    let check_style = Style::default().fg(Color::Green);
 
-            // ASCII status indicators (no emoji width issues)
-            let (status, status_style) = if is_locked {
-                ("--", Style::default().fg(Color::DarkGray))
-            } else if is_completed {
-                ("ok", Style::default().fg(Color::Green))
-            } else {
-                ("  ", Style::default())
-            };
+                    lines.push(Line::from(vec![
+                        Span::styled(check, check_style),
+                        Span::styled(
+                            format!("{}{}", name, wpm_str),
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]));
 
-            let name_style = if is_locked {
-                Style::default().fg(Color::DarkGray)
-            } else if is_selected {
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::White)
-            };
+                    // Cognitive goal as subtitle (if space)
+                    if lines.len() < visible_height {
+                        lines.push(Line::from(Span::styled(
+                            format!("   {}", cognitive_goal),
+                            Style::default().fg(Color::DarkGray),
+                        )));
+                    }
+                }
 
-            lines.push(Line::from(vec![
-                Span::styled(arrow, Style::default().fg(Color::Cyan)),
-                Span::styled(format!("{} ", status), status_style),
-                Span::styled(
-                    format!("{:2}. {:<25}", i + 1, lesson.name),
-                    name_style,
-                ),
-                Span::styled(lesson.description, Style::default().fg(Color::DarkGray)),
-            ]));
+                DisplayRow::LessonEntry {
+                    lesson_id,
+                    name,
+                    description,
+                    is_locked,
+                    is_completed,
+                } => {
+                    let is_selected = *lesson_id == self.selected;
+                    let arrow = if is_selected { "> " } else { "  " };
+
+                    let (status, status_style) = if *is_locked {
+                        ("--", Style::default().fg(Color::DarkGray))
+                    } else if *is_completed {
+                        ("ok", Style::default().fg(Color::Green))
+                    } else {
+                        ("  ", Style::default())
+                    };
+
+                    let name_style = if *is_locked {
+                        Style::default().fg(Color::DarkGray)
+                    } else if is_selected {
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::White)
+                    };
+
+                    // Indent lessons under their stage header
+                    lines.push(Line::from(vec![
+                        Span::styled("  ", Style::default()),
+                        Span::styled(arrow, Style::default().fg(Color::Cyan)),
+                        Span::styled(format!("{} ", status), status_style),
+                        Span::styled(format!("{:<25}", name), name_style),
+                        Span::styled(*description, Style::default().fg(Color::DarkGray)),
+                    ]));
+                }
+
+                DisplayRow::Blank => {
+                    lines.push(Line::from(""));
+                }
+            }
         }
+
         let list = Paragraph::new(lines);
         list.render(list_area, buf);
 
