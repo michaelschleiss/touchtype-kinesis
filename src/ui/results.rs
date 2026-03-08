@@ -18,11 +18,10 @@ pub struct ResultsWidget<'a> {
 impl Widget for ResultsWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let chunks = Layout::vertical([
-            Constraint::Length(4),  // header
-            Constraint::Length(8),  // main stats
-            Constraint::Length(8),  // weak keys
-            Constraint::Min(1),    // spacer
-            Constraint::Length(3), // help
+            Constraint::Length(3),  // header
+            Constraint::Length(7),  // main stats
+            Constraint::Min(4),    // weak keys (flexible)
+            Constraint::Length(2), // help
         ])
         .split(area);
 
@@ -145,7 +144,9 @@ impl Widget for ResultsWidget<'_> {
                     ),
                     Span::styled(
                         format!("{:.0}%", acc * 100.0),
-                        Style::default().fg(if *acc >= 0.9 {
+                        Style::default().fg(if *acc >= 0.95 {
+                            Color::Green
+                        } else if *acc >= 0.85 {
                             Color::Yellow
                         } else {
                             Color::Red
@@ -173,6 +174,6 @@ impl Widget for ResultsWidget<'_> {
             Span::styled("] Menu", Style::default().fg(Color::DarkGray)),
         ]))
         .alignment(Alignment::Center);
-        help.render(chunks[4], buf);
+        help.render(chunks[3], buf);
     }
 }

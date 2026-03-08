@@ -29,13 +29,13 @@ impl MainMenuWidget {
 impl Widget for MainMenuWidget {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let chunks = Layout::vertical([
-            Constraint::Length(6),  // title
-            Constraint::Min(10),   // menu items
+            Constraint::Length(5), // title
+            Constraint::Min(8),   // menu items
             Constraint::Length(2), // help
         ])
         .split(area);
 
-        // Title
+        // Title (centered)
         let title = vec![
             Line::from(""),
             Line::from(Span::styled(
@@ -53,11 +53,19 @@ impl Widget for MainMenuWidget {
         let title_widget = Paragraph::new(title).alignment(Alignment::Center);
         title_widget.render(chunks[0], buf);
 
-        // Menu items
+        // Menu items — fixed left margin, not centered
+        let left_margin = (area.width.saturating_sub(60) / 2).max(4);
+        let menu_area = Rect {
+            x: chunks[1].x + left_margin,
+            width: chunks[1].width.saturating_sub(left_margin),
+            ..chunks[1]
+        };
+
         let mut lines: Vec<Line> = Vec::new();
+        lines.push(Line::from(""));
         for (i, (name, desc)) in MENU_ITEMS.iter().enumerate() {
             let is_selected = i == self.selected;
-            let arrow = if is_selected { " > " } else { "   " };
+            let arrow = if is_selected { "> " } else { "  " };
             let name_style = if is_selected {
                 Style::default()
                     .fg(Color::Cyan)
@@ -73,13 +81,13 @@ impl Widget for MainMenuWidget {
                 Span::styled(*desc, desc_style),
             ]));
         }
-        let menu = Paragraph::new(lines).alignment(Alignment::Center);
-        menu.render(chunks[1], buf);
+        let menu = Paragraph::new(lines);
+        menu.render(menu_area, buf);
 
         // Help line
         let help = Paragraph::new(Line::from(vec![
-            Span::styled("  [", Style::default().fg(Color::DarkGray)),
-            Span::styled("↑↓", Style::default().fg(Color::White)),
+            Span::styled("[", Style::default().fg(Color::DarkGray)),
+            Span::styled("j/k", Style::default().fg(Color::White)),
             Span::styled("] Navigate  [", Style::default().fg(Color::DarkGray)),
             Span::styled("Enter", Style::default().fg(Color::White)),
             Span::styled("] Select  [", Style::default().fg(Color::DarkGray)),
@@ -102,7 +110,7 @@ pub struct LessonSelectWidget<'a> {
 impl Widget for LessonSelectWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let chunks = Layout::vertical([
-            Constraint::Length(3), // header
+            Constraint::Length(2), // header
             Constraint::Min(5),   // lesson list
             Constraint::Length(2), // help
         ])
@@ -117,8 +125,15 @@ impl Widget for LessonSelectWidget<'_> {
         )));
         header.render(chunks[0], buf);
 
-        // Lesson list — show a scrolling window around the selected item
-        let visible_height = chunks[1].height as usize;
+        // Lesson list — fixed left margin
+        let left_margin = (area.width.saturating_sub(70) / 2).max(2);
+        let list_area = Rect {
+            x: chunks[1].x + left_margin,
+            width: chunks[1].width.saturating_sub(left_margin),
+            ..chunks[1]
+        };
+
+        let visible_height = list_area.height as usize;
         let scroll_offset = if self.selected >= visible_height {
             self.selected - visible_height + 1
         } else {
@@ -133,14 +148,17 @@ impl Widget for LessonSelectWidget<'_> {
 
             let is_selected = i == self.selected;
             let is_locked = i > self.highest_unlocked;
+            let is_completed = i < self.highest_unlocked;
 
-            let arrow = if is_selected { " > " } else { "   " };
-            let status = if is_locked {
-                "🔒 "
-            } else if i < self.highest_unlocked {
-                "✓  "
+            let arrow = if is_selected { "> " } else { "  " };
+
+            // ASCII status indicators (no emoji width issues)
+            let (status, status_style) = if is_locked {
+                ("--", Style::default().fg(Color::DarkGray))
+            } else if is_completed {
+                ("ok", Style::default().fg(Color::Green))
             } else {
-                "   "
+                ("  ", Style::default())
             };
 
             let name_style = if is_locked {
@@ -155,7 +173,7 @@ impl Widget for LessonSelectWidget<'_> {
 
             lines.push(Line::from(vec![
                 Span::styled(arrow, Style::default().fg(Color::Cyan)),
-                Span::raw(status),
+                Span::styled(format!("{} ", status), status_style),
                 Span::styled(
                     format!("{:2}. {:<25}", i + 1, lesson.name),
                     name_style,
@@ -164,12 +182,12 @@ impl Widget for LessonSelectWidget<'_> {
             ]));
         }
         let list = Paragraph::new(lines);
-        list.render(chunks[1], buf);
+        list.render(list_area, buf);
 
         // Help
         let help = Paragraph::new(Line::from(vec![
-            Span::styled("  [", Style::default().fg(Color::DarkGray)),
-            Span::styled("↑↓", Style::default().fg(Color::White)),
+            Span::styled("[", Style::default().fg(Color::DarkGray)),
+            Span::styled("j/k", Style::default().fg(Color::White)),
             Span::styled("] Navigate  [", Style::default().fg(Color::DarkGray)),
             Span::styled("Enter", Style::default().fg(Color::White)),
             Span::styled("] Start  [", Style::default().fg(Color::DarkGray)),

@@ -29,11 +29,11 @@ impl Finger {
     pub fn color(&self) -> ratatui::style::Color {
         use ratatui::style::Color;
         match (self.hand, self.finger) {
-            (Hand::Left, FingerType::Pinky) | (Hand::Right, FingerType::Pinky) => Color::Red,
+            (Hand::Left, FingerType::Pinky) | (Hand::Right, FingerType::Pinky) => Color::Magenta,
             (Hand::Left, FingerType::Ring) | (Hand::Right, FingerType::Ring) => Color::Yellow,
             (Hand::Left, FingerType::Middle) | (Hand::Right, FingerType::Middle) => Color::Green,
             (Hand::Left, FingerType::Index) | (Hand::Right, FingerType::Index) => Color::Cyan,
-            (Hand::Left, FingerType::Thumb) | (Hand::Right, FingerType::Thumb) => Color::Magenta,
+            (Hand::Left, FingerType::Thumb) | (Hand::Right, FingerType::Thumb) => Color::Blue,
         }
     }
 

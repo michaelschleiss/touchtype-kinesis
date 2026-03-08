@@ -16,24 +16,20 @@ pub struct ProgressWidget<'a> {
 impl Widget for ProgressWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let chunks = Layout::vertical([
-            Constraint::Length(4),  // header
-            Constraint::Length(10), // stats
-            Constraint::Length(10), // per-key breakdown
-            Constraint::Min(1),    // spacer
+            Constraint::Length(2),  // header
+            Constraint::Length(7),  // stats
+            Constraint::Min(4),    // per-key breakdown (flexible)
             Constraint::Length(2), // help
         ])
         .split(area);
 
         // Header
-        let header = Paragraph::new(vec![
-            Line::from(""),
-            Line::from(Span::styled(
-                " Progress",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            )),
-        ]);
+        let header = Paragraph::new(Line::from(Span::styled(
+            " Progress",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )));
         header.render(chunks[0], buf);
 
         // Summary stats
@@ -43,11 +39,12 @@ impl Widget for ProgressWidget<'_> {
         let best_acc = self.progress.best_accuracy * 100.0;
 
         let bar_width = 20usize;
-        let filled = (lessons_done as f64 / self.total_lessons as f64 * bar_width as f64) as usize;
+        let filled =
+            (lessons_done as f64 / self.total_lessons as f64 * bar_width as f64) as usize;
         let bar: String = format!(
             "[{}{}] {}/{}",
-            "█".repeat(filled),
-            "░".repeat(bar_width - filled),
+            "#".repeat(filled),
+            "-".repeat(bar_width - filled),
             lessons_done,
             self.total_lessons
         );
@@ -55,18 +52,18 @@ impl Widget for ProgressWidget<'_> {
         let stats = Paragraph::new(vec![
             Line::from(""),
             Line::from(vec![
-                Span::styled("    Lessons:    ", Style::default().fg(Color::DarkGray)),
+                Span::styled("    Lessons:   ", Style::default().fg(Color::DarkGray)),
                 Span::styled(bar, Style::default().fg(Color::Cyan)),
             ]),
             Line::from(vec![
-                Span::styled("    Sessions:   ", Style::default().fg(Color::DarkGray)),
+                Span::styled("    Sessions:  ", Style::default().fg(Color::DarkGray)),
                 Span::styled(
                     format!("{}", total_sessions),
                     Style::default().fg(Color::White),
                 ),
             ]),
             Line::from(vec![
-                Span::styled("    Best WPM:   ", Style::default().fg(Color::DarkGray)),
+                Span::styled("    Best WPM:  ", Style::default().fg(Color::DarkGray)),
                 Span::styled(
                     format!("{:.0}", best_wpm),
                     Style::default()
@@ -75,7 +72,7 @@ impl Widget for ProgressWidget<'_> {
                 ),
             ]),
             Line::from(vec![
-                Span::styled("    Best Acc:   ", Style::default().fg(Color::DarkGray)),
+                Span::styled("    Best Acc:  ", Style::default().fg(Color::DarkGray)),
                 Span::styled(
                     format!("{:.1}%", best_acc),
                     Style::default()
@@ -86,10 +83,11 @@ impl Widget for ProgressWidget<'_> {
         ]);
         stats.render(chunks[1], buf);
 
-        // Per-key accuracy (top 10 weakest)
+        // Per-key accuracy (flexible height)
         let mut key_stats: Vec<_> = self.progress.per_key_accuracy.iter().collect();
         key_stats.sort_by(|a, b| a.1.partial_cmp(b.1).unwrap());
 
+        let max_keys = (chunks[2].height as usize).saturating_sub(2);
         let mut key_lines = vec![
             Line::from(""),
             Line::from(Span::styled(
@@ -102,11 +100,11 @@ impl Widget for ProgressWidget<'_> {
 
         if key_stats.is_empty() {
             key_lines.push(Line::from(Span::styled(
-                "    No data yet — complete some lessons!",
+                "    No data yet",
                 Style::default().fg(Color::DarkGray),
             )));
         } else {
-            for (ch, acc) in key_stats.iter().take(8) {
+            for (ch, acc) in key_stats.iter().take(max_keys.min(8)) {
                 let display = if **ch == ' ' {
                     "Space".to_string()
                 } else {
@@ -139,11 +137,11 @@ impl Widget for ProgressWidget<'_> {
 
         // Help
         let help = Paragraph::new(Line::from(vec![
-            Span::styled("  [", Style::default().fg(Color::DarkGray)),
+            Span::styled("[", Style::default().fg(Color::DarkGray)),
             Span::styled("Esc", Style::default().fg(Color::White)),
             Span::styled("] Back to Menu", Style::default().fg(Color::DarkGray)),
         ]))
         .alignment(Alignment::Center);
-        help.render(chunks[4], buf);
+        help.render(chunks[3], buf);
     }
 }

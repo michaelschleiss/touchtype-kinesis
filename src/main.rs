@@ -15,7 +15,6 @@ use crossterm::{
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 fn main() -> io::Result<()> {
-    // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -25,10 +24,8 @@ fn main() -> io::Result<()> {
 
     let mut app = app::App::new();
 
-    // Main event loop
     let result = run_loop(&mut terminal, &mut app);
 
-    // Restore terminal
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
@@ -47,12 +44,21 @@ fn run_loop(
             return Ok(());
         }
 
-        // Poll with a short timeout so we can update animations/timers
+        // Wait for at least one event
         if event::poll(Duration::from_millis(50))? {
-            if let Event::Key(key) = event::read()? {
-                // Ignore key release events (crossterm 0.28 sends both press and release)
-                if key.kind == crossterm::event::KeyEventKind::Press {
-                    app.handle_key(key);
+            // Drain all pending events to avoid input lag at high WPM
+            loop {
+                match event::read()? {
+                    Event::Key(key) => {
+                        if key.kind == crossterm::event::KeyEventKind::Press {
+                            app.handle_key(key);
+                        }
+                    }
+                    _ => {}
+                }
+                // Check for more events without blocking
+                if !event::poll(Duration::ZERO)? {
+                    break;
                 }
             }
         }
